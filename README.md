@@ -144,7 +144,7 @@ SmartJob-Radar
 
 **Berk Aydemir**
 AI Automation Engineer
-GitHub: https://github.com/BerkAydemir8n
+GitHub: https://github.com/BerkAydemirn8n
 
 ---
 
