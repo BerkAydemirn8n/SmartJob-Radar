@@ -77,7 +77,7 @@ Telegram Notification
 
 1. Clone this repository.
 ```bash
-git clone https://github.com/BerkAydemir8n/SmartJob-Radar.git
+git clone https://github.com/BerkAydemirn8n/SmartJob-Radar.git
 ```
 
 2. Import `workflow.json` into n8n.
