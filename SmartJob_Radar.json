@@ -1,0 +1,621 @@
+{
+  "name": "SmartJob Radar",
+  "nodes": [
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -376,
+        -216
+      ],
+      "id": "166d96a6-b9d9-4e88-8261-a6164fe32ac6",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "PY7nnCojH9iCtA4t",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.adzuna.com/v1/api/jobs/de/search/1",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "app_id",
+              "value": "YOUR_ADZUNA_APP_ID"
+            },
+            {
+              "name": "app_key",
+              "value": "YOUR_ADZUNA_APP_KEY"
+            },
+            {
+              "name": "results_per_page",
+              "value": "10"
+            },
+            {
+              "name": "what",
+              "value": "QA "
+            },
+            {
+              "name": "where",
+              "value": "Berlin"
+            },
+            {
+              "name": "sort_by",
+              "value": "date"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1120,
+        -352
+      ],
+      "id": "199fae8f-d99a-48c6-9b04-a907e90e23d4",
+      "name": "Adzuna API: Fetch Jobs",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawInput = $input.all()[0].json;\n\n// Eğer gelen yanıt bir dizi değilse veya Adzuna çöküp HTML döndüyse akışı güvenli bir şekilde durdur\nif (!rawInput || !rawInput.results || !Array.isArray(rawInput.results)) {\n  console.log(\"Adzuna API yanıt vermedi veya hatalı veri döndü.\");\n  return []; \n// Akış burada güvenle durur, diğer node'lar tetiklenmez.\n}\n// n8n'in yeni versiyonlarında doğrudan $input.all() kullanılır.\nconst rawData = $input.all()[0].json;\n\n// Eğer results alanı yoksa veya boşsa hata almamak için kontrol\nif (!rawData || !rawData.results || !Array.isArray(rawData.results)) {\n  return [];\n}\n\n// 1. İlanları dönüştür ve temizle\nconst processedJobs = rawData.results.map(job => {\n  \n  // Maaş verisini profesyonel bir formata dönüştürelim\n  let salaryFormatted = \"Not Specified\";\n  if (job.salary_min && job.salary_max) {\n    salaryFormatted = `€${job.salary_min.toLocaleString()} - €${job.salary_max.toLocaleString()}`;\n  } else if (job.salary_min) {\n    salaryFormatted = `Min €${job.salary_min.toLocaleString()}`;\n  } else if (job.salary_max) {\n    salaryFormatted = `Max €${job.salary_max.toLocaleString()}`;\n  }\n\n  // Lokasyon bilgisini temiz bir string yapalım\n  const locationAreas = job.location?.area ? job.location.area.join(\" > \") : (job.location?.display_name || \"N/A\");\n\n  // Tarihi ISO'dan daha okunabilir YYYY-MM-DD HH:mm formatına dönüştürelim\n  const createdDate = job.created ? new Date(job.created).toISOString().replace('T', ' ').substring(0, 16) : null;\n\n  return {\n    id: job.id,\n    title: job.title?.trim() || \"Untitled Position\",\n    company: job.company?.display_name || \"Unknown Company\",\n    category: job.category?.label !== \"Unknown\" ? job.category?.label : \"General / Uncategorized\",\n    location: job.location?.display_name || \"N/A\",\n    location_hierarchy: locationAreas,\n    contract_type: job.contract_type || \"N/A\",\n    contract_time: job.contract_time || \"N/A\",\n    salary: salaryFormatted,\n    raw_salary_min: job.salary_min || null,\n    raw_salary_max: job.salary_max || null,\n    description: job.description ? job.description.replace(/…$/, \"...\").trim() : \"\",\n    apply_url: job.redirect_url,\n    posted_at: createdDate,\n    coordinates: {\n      lat: job.latitude || null,\n      lng: job.longitude || null\n    }\n  };\n});\n\n// 2. BATCH PROCESSING: Tüm ilanları tek bir dizi altında OpenAI'a paketleyip dönüyoruz\nreturn [{\n  json: {\n    jobs: processedJobs,\n    total_jobs: processedJobs.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        -352
+      ],
+      "id": "475bc3b5-2428-4418-acb7-d86559780613",
+      "name": "JS: Clean & Normalize Data"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=={{ \"Lütfen aşağıdaki \" + $json.total_jobs + \" adet iş ilanı verisini analiz et ve belirtilen JSON ARRAY formatında yanıtla:\\n\\n\" + JSON.stringify($json.jobs) }}",
+        "options": {
+          "systemMessage": "=Sen yazılım ve teknoloji sektöründeki iş fırsatlarını analiz eden uzman bir \"İnsan Kaynakları ve Veri Analisti\" AI asistanısın.\n\nGÖREVİN:\nSana JSON dizisi (array) olarak sunulan iş ilanlarını tek tek analiz etmek, teknik gereksinimleri tespit etmek ve her biri için Türkçe özet rapor oluşturmaktır.\n\nKURALLAR:\n1. Sadece sağlanan veri üzerinden çıkarım yap. Uydurma bilgi ekleme.\n2. \"Frontend\", \"QA Automation\" gibi teknik terimleri aynen koru.\n3. Yanıtını HER ZAMAN sadece geçerli bir JSON ARRAY (dizi) formatında ver. Başka hiçbir açıklama veya markdown metni (```json ... ``` gibi) ekleme.\n\nİSTENEN JSON ÇIKTI FORMATI:\n[\n  {\n    \"id\": 123456,\n    \"is_basligi\": \"String\",\n    \"sirket\": \"String\",\n    \"uzaktan_calisma_durumu\": \"Uzaktan / Hibrit / Ofiste / Belirtilmemiş\",\n    \"deneyim_seviyesi\": \"Junior / Mid-Level / Senior / Lead / Belirtilmemiş\",\n    \"aranan_anahtar_teknolojiler\": [\"Tech1\", \"Tech2\"],\n    \"ozet\": \"İlanın 2 cümlelik profesyonel Türkçe özeti\",\n    \"ilan_kalite_puani\": 8,\n    \"puanlama_nedeni\": \"Kısa açıklama\",\n    \"basvuru_tavsiyesi\": \"1 anahtar yetenek\"\n  }\n]"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -448,
+        -448
+      ],
+      "id": "c5764fb6-4dc3-4802-a9a0-97a226b3bf3d",
+      "name": "OpenAI: Evaluate & Summarize"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "793faace-278e-44e2-aabd-e93a18bca6e1",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "d11deb2a-c4f0-44e8-a660-47898186e1d9",
+              "name": "title",
+              "value": "={{ $json.is_basligi }}",
+              "type": "string"
+            },
+            {
+              "id": "fa023d0c-a7e5-4e1b-86f9-3a079d5a5102",
+              "name": "experience",
+              "value": "={{ $json.deneyim_seviyesi }}",
+              "type": "string"
+            },
+            {
+              "id": "0e429e00-6c81-44a4-8685-eca782fd0bc7",
+              "name": "technologies",
+              "value": "={{ $json.aranan_anahtar_teknolojiler }}",
+              "type": "string"
+            },
+            {
+              "id": "78bb611b-9ed3-46e2-ac22-485f7c28860f",
+              "name": "company",
+              "value": "={{ $json.sirket }}",
+              "type": "string"
+            },
+            {
+              "id": "4c9ef5e2-b4bc-4b9b-8cad-55d714592199",
+              "name": "location",
+              "value": "={{ $json.location }}",
+              "type": "string"
+            },
+            {
+              "id": "4bea764b-c94e-4c16-8f53-30481ca5cc23",
+              "name": "salary",
+              "value": "={{ $json.salary }}",
+              "type": "string"
+            },
+            {
+              "id": "a61c7a4f-439b-4080-a7b3-bf6c6a21302e",
+              "name": "quality_score",
+              "value": "={{ $json.ilan_kalite_puani }}",
+              "type": "string"
+            },
+            {
+              "id": "4e49e072-0d7f-4bd7-83ee-1fc8428368fa",
+              "name": "summary",
+              "value": "={{ $json.ozet }}",
+              "type": "string"
+            },
+            {
+              "id": "ce6cbd0b-0d7d-47c1-97db-878fd53dc4e0",
+              "name": "apply_url",
+              "value": "={{ $json.apply_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        128,
+        -448
+      ],
+      "id": "c20a250b-4ad8-41b0-a427-c9b023b9bfa8",
+      "name": "Data Mapper: Format Output"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Adzuna_AI_Job_Board",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sayfa1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Job ID": "={{ $json.id }}",
+            "Job Title": "={{ $json.title }}",
+            "Company": "={{ $json.company }}",
+            "Location": "={{ $json.location }}",
+            "Experience": "={{ $json.experience }}",
+            "Technologies": "={{ $json.technologies }}",
+            "Quality Score": "={{ $json.quality_score }}",
+            "AI Summary": "={{ $json.summary }}",
+            "Apply URL": "={{ $json.apply_url }}",
+            "Salary": "={{ $json.salary }}"
+          },
+          "matchingColumns": [
+            "Job ID"
+          ],
+          "schema": [
+            {
+              "id": "Job ID",
+              "displayName": "Job ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Location",
+              "displayName": "Location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Experience",
+              "displayName": "Experience",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Technologies",
+              "displayName": "Technologies",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Salary",
+              "displayName": "Salary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Quality Score",
+              "displayName": "Quality Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI Summary",
+              "displayName": "AI Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Apply URL",
+              "displayName": "Apply URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        352,
+        -448
+      ],
+      "id": "0821fddf-e1b5-4212-8efb-c7f141d622a8",
+      "name": "Google Sheets: Save All Jobs",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "bnLkoHbKW9pXgoF6",
+          "name": "Google Sheets account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🚀 <b>YÜKSEK KALİTELİ YENİ İŞ FIRSATI!</b>\n\n📌 <b>Pozisyon:</b> {{ $json['Job Title'] }}\n🏢 <b>Şirket:</b> {{ $json.Company }}\n⭐ <b>AI Kalite Puanı:</b> {{ $json['Quality Score'] }}/10\n🎯 <b>Deneyim:</b> {{ $json.Experience }}\n\n💡 <b>Özet:</b> \n{{ $json['AI Summary'] }}\n\n🛠️ <b>Aranan Teknolojiler:</b>\n{{ Array.isArray($json.Technologies) ? $json.Technologies.join(', ') : $json.Technologies }}\n\n🔗 <a href=\"{{ $json['Apply URL'] }}\">İlana Başvurmak İçin Tıklayın</a>",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        -448
+      ],
+      "id": "efa21ac8-7d56-438a-bf21-1e44dedb3bb4",
+      "name": "Telegram: Send High Score Alerts",
+      "webhookId": "578a0192-fc09-4ae9-9e92-a242bfc93934",
+      "credentials": {
+        "telegramApi": {
+          "id": "RqvbUvqGMdQBTTB4",
+          "name": "Telegram First"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e74b4571-981d-432d-b1c3-a0d1ee0f6f2e",
+              "leftValue": "={{ $json['Quality Score'].toNumber() }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        576,
+        -448
+      ],
+      "id": "c159a98c-c241-4ba7-8f94-bcf4a4fc40dc",
+      "name": "Filter: Quality >= 7"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1344,
+        -448
+      ],
+      "id": "432b2e43-96bb-49f8-9fce-3c3270e5c592",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. OpenAI çıktısını ve Filtrelenmiş ham verileri alıyoruz\nconst rawOutput = $input.all()[0].json.output;\nconst filteredOriginalJobs = $('JS: Filter New Jobs Only').first().json.jobs;\n\nlet analyzedJobs = [];\n\ntry {\n  const cleanedText = rawOutput.replace(/```json/g, '').replace(/```/g, '').trim();\n  analyzedJobs = JSON.parse(cleanedText);\n} catch (error) {\n  throw new Error(\"OpenAI çıktısı geçerli bir JSON dizisi formatında değil: \" + error.message);\n}\n\n// 2. OpenAI analizi ile orijinal verileri ID üzerinden eşleştirip birleştiriyoruz\nreturn analyzedJobs.map(aiJob => {\n  const matchingOriginal = filteredOriginalJobs.find(orig => String(orig.id) === String(aiJob.id)) || {};\n  \n  return {\n    json: {\n      ...aiJob,\n      location: matchingOriginal.location || \"N/A\",\n      salary: matchingOriginal.salary || \"Not Specified\",\n      apply_url: matchingOriginal.apply_url || \"\",\n      company: matchingOriginal.company || aiJob.sirket\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        -448
+      ],
+      "id": "60afaeba-96a1-4097-a883-2243697a477c",
+      "name": "JS: Split AI Batch Response"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Adzuna_AI_Job_Board",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sayfa1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Job ID",
+              "lookupValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -896,
+        -544
+      ],
+      "id": "cc54a05d-0ebf-44e8-9eaa-8a98dc597600",
+      "name": "Google Sheets: Get Existing IDs",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "bnLkoHbKW9pXgoF6",
+          "name": "Google Sheets account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Adzuna'dan gelen yeni temizlenmiş ilan listesini alıyoruz\nconst newJobs = $('JS: Clean & Normalize Data').first().json.jobs || [];\n\n// 2. Google Sheets'ten daha önce kaydedilmiş Job ID'leri alıyoruz\nconst existingRows = $('Google Sheets: Get Existing IDs').all();\nconst existingIds = existingRows.map(row => String(row.json['Job ID'])).filter(Boolean);\n\n// 3. Daha önce kaydedilmemiş olan SADECE YENİ ilanları filtreliyoruz\nconst filteredJobs = newJobs.filter(job => !existingIds.includes(String(job.id)));\n\n// 4. Eğer hiç yeni ilan yoksa akışı burada güvenli bir şekilde durduruyoruz\nif (filteredJobs.length === 0) {\n  return []; // n8n sonraki adımları (OpenAI, Telegram vb.) çalıştırmaz.\n}\n\n// 5. Yeni ilanları OpenAI'a toplu paket halinde gönderiyoruz\nreturn [{\n  json: {\n    jobs: filteredJobs,\n    total_jobs: filteredJobs.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        -448
+      ],
+      "id": "c5964343-1d08-4b3c-b591-8935a7b00963",
+      "name": "JS: Filter New Jobs Only"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "OpenAI: Evaluate & Summarize",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adzuna API: Fetch Jobs": {
+      "main": [
+        [
+          {
+            "node": "JS: Clean & Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS: Clean & Normalize Data": {
+      "main": [
+        [
+          {
+            "node": "JS: Filter New Jobs Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: Evaluate & Summarize": {
+      "main": [
+        [
+          {
+            "node": "JS: Split AI Batch Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Mapper: Format Output": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Save All Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Save All Jobs": {
+      "main": [
+        [
+          {
+            "node": "Filter: Quality >= 7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Quality >= 7": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send High Score Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Get Existing IDs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Adzuna API: Fetch Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS: Split AI Batch Response": {
+      "main": [
+        [
+          {
+            "node": "Data Mapper: Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Get Existing IDs": {
+      "main": [
+        [
+          {
+            "node": "JS: Filter New Jobs Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS: Filter New Jobs Only": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: Evaluate & Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "2f1134e3-93a4-44a3-8c12-88724a09e1b7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cd490cb4135e798e29189da8ffa80dfab1b538f96740d886548b42d9937a6766"
+  },
+  "nodeGroups": [],
+  "id": "Bak0EedKt5eRSYXW",
+  "tags": []
+}
